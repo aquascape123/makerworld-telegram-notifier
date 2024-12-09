@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Monitor MakerWorld",
+  "version": "1.0",
+  "description": "Monitor downloads and prints on MakerWorld and send Telegram notifications.",
+  "permissions": [
+      "storage",
+      "scripting"
+  ],
+  "host_permissions": [
+      "https://makerworld.com/it/@aquascape/*"
+  ],
+  "content_scripts": [
+      {
+          "matches": ["https://makerworld.com/it/@aquascape/*"],
+          "js": ["content.js"]
+      }
+  ],
+  "icons": {
+      "48": "icon.png",
+      "128": "icon.png"
+  },
+  "action": {
+      "default_popup": "popup.html"
+  }
+}
