@@ -19,6 +19,7 @@ This Chrome extension monitors your MakerWorld account for changes in downloads,
 1. Open the options page.
 2. Enter your Telegram Bot Token, Chat ID, and preferred refresh interval.
 3. Save your settings. The extension will start monitoring automatically.
+4. Open your makerworld profile page "https://makerworld.com/en/@yourusername" and leave it open
 
 ## Support the Developer
 If this extension has been helpful to you, consider supporting my work by boosting my models on MakerWorld:
