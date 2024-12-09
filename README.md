@@ -4,7 +4,7 @@ This Chrome extension monitors your MakerWorld account for changes in downloads,
 
 ## Features
 - Monitors downloads, prints, and points on MakerWorld.
-- Sends real-time Telegram notifications.
+- Sends Telegram notifications (at the end of the refresh interval).
 - Fully customizable: configure your Telegram Bot Token, Chat ID, and refresh interval.
 
 ## Installation
@@ -13,6 +13,7 @@ This Chrome extension monitors your MakerWorld account for changes in downloads,
 3. Enable **Developer Mode** (top-right corner).
 4. Click on **Load unpacked** and select the extracted folder.
 5. Configure your **Telegram Token**, **Chat ID**, and refresh interval on the options page.
+   - YOUR MAKERWORLD PROFILE PAGE MUST REMAIN OPEN -
 
 ## Usage
 1. Open the options page.
