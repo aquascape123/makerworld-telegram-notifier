@@ -1,22 +1,27 @@
-// Monitor class for tracking values and sending Telegram notifications
 class ValueMonitor {
   constructor(config) {
     this.telegramToken = config.telegramToken;
     this.chatId = config.chatId;
     this.refreshInterval = config.refreshInterval || 900000; // Default 15 minutes
-    
-    // Load previous values from storage
-    this.previousDownloads = this.loadValue('previousDownloads', 0);
-    this.previousPrints = this.loadValue('previousPrints', 0);
-    this.previousPoints = this.loadValue('previousPoints', 0);
+    this.previousValues = {};
+
+    // Carica i valori precedenti dal localStorage
+    this.loadPreviousValues();
   }
 
-  loadValue(key, defaultValue) {
-    return parseFloat(localStorage.getItem(key) || defaultValue.toString());
+  loadPreviousValues() {
+    // Carica i valori precedenti dal localStorage
+    const storedValues = localStorage.getItem('trackedModelValues');
+    this.previousValues = storedValues ? JSON.parse(storedValues) : {
+      models: {},
+      points: 0,
+      lastNotificationTime: 0
+    };
   }
 
-  saveValue(key, value) {
-    localStorage.setItem(key, value.toString());
+  saveValues() {
+    // Salva i valori correnti nel localStorage
+    localStorage.setItem('trackedModelValues', JSON.stringify(this.previousValues));
   }
 
   async sendTelegramMessage(message) {
@@ -33,8 +38,6 @@ class ValueMonitor {
         return false;
       }
 
-      const data = await response.json();
-      console.log('Message sent:', data);
       return true;
     } catch (err) {
       console.error('Network or processing error:', err);
@@ -44,48 +47,71 @@ class ValueMonitor {
 
   getCurrentValues() {
     try {
-      const downloadXPath = '//*[@id="userInfo_wrap"]/div[7]/div/div[3]';
-      const printsXPath = '//*[@id="userInfo_wrap"]/div[7]/div/div[4]';
-      const pointsXPath = '//*[@id="userInfo_wrap"]/div[4]/div/a/div/div/span/span';
-      
-      const downloadElement = document.evaluate(
-        downloadXPath,
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      ).singleNodeValue;
-      
-      const printsElement = document.evaluate(
-        printsXPath,
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      ).singleNodeValue;
-
-      const pointsElement = document.evaluate(
-        pointsXPath,
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      ).singleNodeValue;
-
-      if (downloadElement && printsElement && pointsElement) {
-        return {
-          downloads: parseInt(downloadElement.textContent, 10),
-          prints: parseInt(printsElement.textContent, 10),
-          points: parseFloat(pointsElement.textContent.replace(',', '.')),
+      const downloadElements = document.querySelectorAll('[data-trackid]');
+      const currentValues = {
+        models: {},
+        points: 0
+      };
+  
+      downloadElements.forEach((element) => {
+        const modelId = element.getAttribute('data-trackid');
+        
+        // Estrai solo il nome del modello, rimuovendo altri dettagli
+        const fullText = element.textContent.trim();
+        const modelName = fullText.split(/\d/)[0].trim();
+        
+        // Find download and prints elements
+        const printsDiv = element.querySelector("div.download_count");
+        const sibs = this.getSiblings(printsDiv);
+        const downloadsDiv = sibs[sibs.length-1];
+  
+        // Extract numeric values
+        const printsStr = printsDiv.querySelector("span").textContent;
+        const downloadsStr = downloadsDiv.querySelector("span").textContent;
+        
+        const numPrints = this.strToNumber(printsStr);
+        const numDownloads = this.strToNumber(downloadsStr);
+  
+        currentValues.models[modelId] = {
+          name: modelName,
+          prints: numPrints,
+          downloads: numDownloads
         };
-      }
+      });
 
-      console.error('Elements not found');
-      return null;
+      // Extract points information
+      const pointsElement = document.evaluate(
+        '//*[@id="userInfo_wrap"]/div[4]/div/a/div/div/span/span',
+        document,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null
+      ).singleNodeValue;
+
+      currentValues.points = parseFloat(pointsElement.textContent.replace(',', '.'));
+
+      return currentValues;
     } catch (error) {
       console.error('Error during value extraction:', error);
       return null;
     }
+  }
+
+  // Utility methods
+  strToNumber(inVal) {
+    const groups = /(\d+)\.?(\d+)?\sk/.exec(inVal);
+    if (groups && groups[1]) {
+      let val = Number(groups[1] * 1000);
+      if (groups[2]) {
+        val += Number(groups[2] * 100);
+      }
+      return val;
+    }
+    return Number(inVal);
+  }
+
+  getSiblings(elem) {
+    return Array.from(elem.parentNode.childNodes).filter((s) => s !== elem);
   }
 
   async checkAndNotify() {
@@ -96,53 +122,73 @@ class ValueMonitor {
       return;
     }
 
-    // Check downloads
-    if (currentValues.downloads > this.previousDownloads) {
-      await this.sendTelegramMessage(`🔥 New Download! 
-Previous: ${this.previousDownloads}
-Current: ${currentValues.downloads}
-Increase: +${currentValues.downloads - this.previousDownloads}`);
-      this.previousDownloads = currentValues.downloads;
-      this.saveValue('previousDownloads', currentValues.downloads);
+    // Flag per verificare se ci sono state modifiche
+    let hasChanges = false;
+
+    // Controlla i download per ogni modello
+    for (const [modelId, modelData] of Object.entries(currentValues.models)) {
+      const prevModelData = this.previousValues.models[modelId] || {};
+
+      // Controlla download
+      if (modelData.downloads > (prevModelData.downloads || 0)) {
+        const increase = modelData.downloads - (prevModelData.downloads || 0);
+        await this.sendTelegramMessage(`🔥 New Downloads for Model ${modelData.name}:
+Previous: ${prevModelData.downloads || 0}
+Current: ${modelData.downloads}
+Increase: +${increase}`);
+        
+        hasChanges = true;
+      }
+
+      // Controlla prints
+      if (modelData.prints > (prevModelData.prints || 0)) {
+        const increase = modelData.prints - (prevModelData.prints || 0);
+        await this.sendTelegramMessage(`📄 New Prints for Model ${modelData.name}:
+Previous: ${prevModelData.prints || 0}
+Current: ${modelData.prints}
+Increase: +${increase}`);
+        
+        hasChanges = true;
+      }
+
+      // Aggiorna i valori precedenti
+      this.previousValues.models[modelId] = modelData;
     }
 
-    // Check prints
-    if (currentValues.prints > this.previousPrints) {
-      await this.sendTelegramMessage(`📄 New print! 
-Previous: ${this.previousPrints}
-Current: ${currentValues.prints}
-Increase: +${currentValues.prints - this.previousPrints}`);
-      this.previousPrints = currentValues.prints;
-      this.saveValue('previousPrints', currentValues.prints);
+    // Controlla punti
+    if (currentValues.points > this.previousValues.points) {
+      const pointsIncrease = currentValues.points - this.previousValues.points;
+      await this.sendTelegramMessage(`⭐️ New Points!
+Previous: ${this.previousValues.points}
+Current: ${currentValues.points} 
+Increase: +${pointsIncrease.toFixed(1)}`);
+      
+      hasChanges = true;
+      this.previousValues.points = currentValues.points;
     }
 
-    // Check points
-    if (currentValues.points > this.previousPoints) {
-      await this.sendTelegramMessage(`⭐️ New Points! 
-Previous: ${this.previousPoints}
-Current: ${currentValues.points}
-Increase: +${(currentValues.points - this.previousPoints).toFixed(1)}`);
-      this.previousPoints = currentValues.points;
-      this.saveValue('previousPoints', currentValues.points);
+    // Salva i valori solo se ci sono state modifiche
+    if (hasChanges) {
+      this.saveValues();
     }
   }
 
   start() {
-    // Load configuration from chrome storage
+    // Carica configurazione da chrome storage
     chrome.storage.sync.get(['telegramToken', 'chatId', 'refreshInterval'], (config) => {
       if (config.telegramToken && config.chatId) {
         this.telegramToken = config.telegramToken;
         this.chatId = config.chatId;
         this.refreshInterval = config.refreshInterval || 900000;
 
-        // Check immediately on start
+        // Controlla immediatamente all'avvio
         this.checkAndNotify();
 
-        // Start monitoring interval
+        // Avvia il monitoraggio
         this.timer = setInterval(() => this.checkAndNotify(), 60000);
         console.log('Monitoring started');
 
-        // Page refresh interval
+        // Intervallo di refresh pagina
         setInterval(() => {
           console.log('Refreshing page...');
           window.location.reload();
@@ -162,6 +208,6 @@ Increase: +${(currentValues.points - this.previousPoints).toFixed(1)}`);
   }
 }
 
-// Initialize the monitor when the page loads
+// Inizializza il monitor quando la pagina carica
 const monitor = new ValueMonitor({});
 monitor.start();
