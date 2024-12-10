@@ -1,6 +1,6 @@
 # MakerWorld Notifier
 
-This Chrome extension monitors your MakerWorld account for changes in downloads, prints, and points. When a change is detected, you will receive a Telegram notification.
+This Chrome extension monitors your MakerWorld account for changes in downloads, prints, and points. When a change is detected, you will receive a Telegram notification with the model name!
 
 ## Features
 - Monitors downloads, prints, and points on MakerWorld.
