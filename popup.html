@@ -12,7 +12,7 @@
         .config-section {
             padding: 10px;
         }
-        input {
+        input, select {
             width: 100%;
             margin-bottom: 10px;
         }
@@ -53,6 +53,15 @@
         
         <label for="refreshInterval">Page Refresh Interval (ms):</label>
         <input type="number" id="refreshInterval" placeholder="Default: 900000 (15 min)" value="900000">
+        
+        <label for="dailyReport">Daily Report (Summary, Top 5 Downloads and Prints):</label>
+        <select id="dailyReport">
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+        </select>
+
+        <label for="notificationTime">Notification Time:</label>
+        <input type="time" id="notificationTime" value="12:00">
         
         <button id="saveButton">Save Configuration</button>
         <div id="status" class="status"></div>

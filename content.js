@@ -45,6 +45,35 @@ class ValueMonitor {
     }
   }
 
+  async sendTelegramPhoto(message, photoUrl) {
+    try {
+      const formData = new FormData();
+      formData.append('chat_id', this.chatId);
+      formData.append('caption', message);
+      
+      // Fetch the image and convert to blob
+      const imageResponse = await fetch(photoUrl);
+      const imageBlob = await imageResponse.blob();
+      formData.append('photo', imageBlob, 'model_image.jpg');
+
+      const response = await fetch(`https://api.telegram.org/bot${this.telegramToken}/sendPhoto`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Telegram Photo Error:', errorText);
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Network or processing error:', err);
+      return false;
+    }
+  }
+
   getCurrentValues() {
     try {
       const downloadElements = document.querySelectorAll('[data-trackid]');
@@ -132,10 +161,21 @@ class ValueMonitor {
       // Controlla download
       if (modelData.downloads > (prevModelData.downloads || 0)) {
         const increase = modelData.downloads - (prevModelData.downloads || 0);
-        await this.sendTelegramMessage(`🔥 New Downloads for Model ${modelData.name}:
+        
+        // Trova l'elemento del modello per estrarre l'URL dell'immagine
+        const modelElement = document.querySelector(`[data-trackid="${modelId}"]`);
+        const imageUrl = modelElement ? modelElement.querySelector('img')?.src : null;
+
+        const message = `🔥 New Downloads for Model: ${modelData.name}
 Previous: ${prevModelData.downloads || 0}
 Current: ${modelData.downloads}
-Increase: +${increase}`);
+Increase: +${increase}`;
+
+        if (imageUrl) {
+          await this.sendTelegramPhoto(message, imageUrl);
+        } else {
+          await this.sendTelegramMessage(message);
+        }
         
         hasChanges = true;
       }
@@ -143,10 +183,21 @@ Increase: +${increase}`);
       // Controlla prints
       if (modelData.prints > (prevModelData.prints || 0)) {
         const increase = modelData.prints - (prevModelData.prints || 0);
-        await this.sendTelegramMessage(`📄 New Prints for Model ${modelData.name}:
+        
+        // Trova l'elemento del modello per estrarre l'URL dell'immagine
+        const modelElement = document.querySelector(`[data-trackid="${modelId}"]`);
+        const imageUrl = modelElement ? modelElement.querySelector('img')?.src : null;
+
+        const message = `📄 New Prints for Model ${modelData.name}:
 Previous: ${prevModelData.prints || 0}
 Current: ${modelData.prints}
-Increase: +${increase}`);
+Increase: +${increase}`;
+
+        if (imageUrl) {
+          await this.sendTelegramPhoto(message, imageUrl);
+        } else {
+          await this.sendTelegramMessage(message);
+        }
         
         hasChanges = true;
       }
@@ -173,29 +224,92 @@ Increase: +${pointsIncrease.toFixed(1)}`);
     }
   }
 
+  getDailySummary() {
+    const currentValues = this.getCurrentValues();
+
+    if (!currentValues) {
+        console.error('Unable to get current values');
+        return null;
+    }
+
+    // Calcola i totali
+    const totalDownloads = Object.values(currentValues.models).reduce((sum, model) => sum + model.downloads, 0);
+    const totalPrints = Object.values(currentValues.models).reduce((sum, model) => sum + model.prints, 0);
+
+    // Ottieni la Top 5
+    const top5Downloads = Object.values(currentValues.models)
+        .sort((a, b) => b.downloads - a.downloads)
+        .slice(0, 5);
+    const top5Prints = Object.values(currentValues.models)
+        .sort((a, b) => b.prints - a.prints)
+        .slice(0, 5);
+
+    return { totalDownloads, totalPrints, top5Downloads, top5Prints };
+  }
+
+  scheduleDailyNotification() {
+    chrome.storage.sync.get(['dailyReport', 'dailyNotificationTime'], (config) => {
+        const dailyReport = config.dailyReport || 'yes';
+        if (dailyReport === 'no') {
+            console.log('[INFO] Daily report is disabled.');
+            return;
+        }
+
+        const dailyTime = config.dailyNotificationTime || '12:00';
+        const [hour, minute] = dailyTime.split(':').map(Number);
+
+        const now = new Date();
+        const nextNotification = new Date();
+        nextNotification.setHours(hour, minute, 0, 0);
+
+        if (nextNotification <= now) {
+            nextNotification.setDate(nextNotification.getDate() + 1);
+        }
+
+        const delay = nextNotification - now;
+        console.log(`[INFO] Daily notification scheduled at ${nextNotification}. Delay: ${delay} ms`);
+
+        setTimeout(async () => {
+            console.log(`[INFO] Triggering daily notification at ${new Date()}`);
+
+            const summary = this.getDailySummary();
+            if (summary) {
+                const message = `
+📊 Daily Summary:
+- Total Downloads: ${summary.totalDownloads}
+- Total Prints: ${summary.totalPrints}
+
+🏆 Top 5 Downloads:
+${summary.top5Downloads.map((m, i) => `${i + 1}. ${m.name}: ${m.downloads}`).join('\n')}
+
+🏅 Top 5 Prints:
+${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: ${m.prints}`).join('\n')}
+                `;
+                await this.sendTelegramMessage(message);
+            } else {
+                console.error('[ERROR] Failed to generate daily summary.');
+            }
+
+            this.scheduleDailyNotification();
+        }, delay);
+    });
+  }
+
   start() {
-    // Carica configurazione da chrome storage
     chrome.storage.sync.get(['telegramToken', 'chatId', 'refreshInterval'], (config) => {
-      if (config.telegramToken && config.chatId) {
-        this.telegramToken = config.telegramToken;
-        this.chatId = config.chatId;
-        this.refreshInterval = config.refreshInterval || 900000;
+        if (config.telegramToken && config.chatId) {
+            this.telegramToken = config.telegramToken;
+            this.chatId = config.chatId;
+            this.refreshInterval = config.refreshInterval || 900000;
 
-        // Controlla immediatamente all'avvio
-        this.checkAndNotify();
+            this.checkAndNotify(); // Controllo immediato
+            this.scheduleDailyNotification(); // Pianifica la notifica giornaliera
 
-        // Avvia il monitoraggio
-        this.timer = setInterval(() => this.checkAndNotify(), 60000);
-        console.log('Monitoring started');
-
-        // Intervallo di refresh pagina
-        setInterval(() => {
-          console.log('Refreshing page...');
-          window.location.reload();
-        }, this.refreshInterval);
-      } else {
-        console.error('Telegram configuration missing. Please set up in extension options.');
-      }
+            this.timer = setInterval(() => this.checkAndNotify(), 60000);
+            console.log('[INFO] Monitoring started');
+        } else {
+            console.error('[ERROR] Telegram configuration missing. Please set up in extension options.');
+        }
     });
   }
 
