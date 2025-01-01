@@ -1,70 +1,122 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>MakerWorld Monitor Configuration</title>
+    <meta charset="UTF-8">
+    <title>MakerWorld Monitor</title>
     <style>
         body {
             width: 300px;
-            padding: 0;
-            margin: 0;
+            padding: 10px;
             font-family: Arial, sans-serif;
         }
         .config-section {
-            padding: 10px;
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
         }
         input, select {
             width: 100%;
-            margin-bottom: 10px;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        select {
+            background-color: white;
         }
         button {
             width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #45a049;
         }
         .status {
             margin-top: 10px;
-            text-align: center;
-        }
-        .support-banner {
-            background-color: #4CAF50;
-            color: white;
-            text-align: center;
             padding: 10px;
-            font-weight: bold;
+            text-align: center;
+            border-radius: 4px;
         }
-        .support-banner a {
-            color: white;
-            text-decoration: underline;
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
         }
-        .config-section h2 {
-            margin-top: 10px;
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+        .section-title {
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+            margin: 15px 0 10px;
+            color: #333;
+        }
+        .daily-report-section {
+            background-color: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 15px;
         }
     </style>
 </head>
 <body>
-    <div class="support-banner">
-        Like this extension? <a href="https://makerworld.com/it/@aquascape" target="_blank">Boost my models!</a>
-    </div>
     <div class="config-section">
-        <h2>Telegram Notification Setup</h2>
-        <label for="telegramToken">Telegram Bot Token:</label>
-        <input type="text" id="telegramToken" placeholder="Enter Telegram Bot Token">
+        <h2 class="section-title">Basic Configuration</h2>
         
-        <label for="chatId">Telegram Chat ID:</label>
-        <input type="text" id="chatId" placeholder="Enter Telegram Chat ID">
+        <label for="telegram-token">Telegram Bot Token:</label>
+        <input 
+            type="text" 
+            id="telegram-token" 
+            placeholder="Enter Bot Token">
         
-        <label for="refreshInterval">Page Refresh Interval (ms):</label>
-        <input type="number" id="refreshInterval" placeholder="Default: 900000 (15 min)" value="900000">
+        <label for="chat-id">Telegram Chat ID:</label>
+        <input 
+            type="text" 
+            id="chat-id" 
+            placeholder="Enter Chat ID">
         
-        <label for="dailyReport">Daily Report (Summary, Top 5 Downloads and Prints):</label>
-        <select id="dailyReport">
+        <label for="refresh-interval">Refresh Interval:</label>
+        <select id="refresh-interval">
+            <option value="300000">5 minutes</option>
+            <option value="600000">10 minutes</option>
+            <option value="900000" selected>15 minutes</option>
+            <option value="1800000">30 minutes</option>
+            <option value="3600000">1 hour</option>
+        </select>
+    </div>
+
+    <div class="daily-report-section">
+        <h2 class="section-title">Daily Report</h2>
+        
+        <label for="daily-report">Enable Daily Report:</label>
+        <select id="daily-report">
             <option value="yes">Yes</option>
             <option value="no">No</option>
         </select>
 
-        <label for="notificationTime">Notification Time:</label>
-        <input type="time" id="notificationTime" value="12:00">
+        <label for="notification-time">Notification Time:</label>
+        <input type="time" id="notification-time" value="12:00">
+    </div>
         
-        <button id="saveButton">Save Configuration</button>
-        <div id="status" class="status"></div>
+    <button id="save-button">Save Configuration</button>
+    <div id="status" class="status"></div>
+
+    <div style="text-align: center; margin-top: 10px;">
+        <small>
+            <a href="https://makerworld.com/en/@aquascape" target="_blank">
+                Support my models!
+            </a>
+        </small>
     </div>
 
     <script src="popup.js"></script>

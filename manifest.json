@@ -4,23 +4,26 @@
   "version": "1.0",
   "description": "Monitor downloads and prints on MakerWorld and send Telegram notifications.",
   "permissions": [
-      "storage",
-      "scripting"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
-      "https://makerworld.com/it/@aquascape/*"
+    "https://makerworld.com/*",
+    "https://api.telegram.org/*"
   ],
   "content_scripts": [
-      {
-          "matches": ["https://makerworld.com/it/@aquascape/*"],
-          "js": ["content.js"]
-      }
+    {
+      "matches": ["https://makerworld.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
   ],
-  "icons": {
-      "48": "icon.png",
-      "128": "icon.png"
-  },
   "action": {
-      "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "icons": {
+    "48": "icon.png",
+    "128": "icon.png"
   }
 }

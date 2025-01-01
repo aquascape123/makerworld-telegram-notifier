@@ -1,59 +1,117 @@
 class ValueMonitor {
-  constructor(config) {
-    this.telegramToken = config.telegramToken;
-    this.chatId = config.chatId;
-    this.refreshInterval = config.refreshInterval || 900000; // Default 15 minutes
-    this.previousValues = {};
-
-    // Carica i valori precedenti dal localStorage
-    this.loadPreviousValues();
+  constructor() {
+    this.telegramToken = '';
+    this.chatId = '';
+    this.previousValues = null;
+    this.checkInterval = null;
+    this.isChecking = false;
   }
 
-  loadPreviousValues() {
-    // Carica i valori precedenti dal localStorage
-    const storedValues = localStorage.getItem('trackedModelValues');
-    this.previousValues = storedValues ? JSON.parse(storedValues) : {
-      models: {},
-      points: 0,
-      lastNotificationTime: 0
-    };
+  async loadPreviousValues() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['previousValues'], (result) => {
+        if (result.previousValues) {
+          console.log('Previous values loaded:', result.previousValues);
+          this.previousValues = result.previousValues;
+        }
+        resolve();
+      });
+    });
   }
 
-  saveValues() {
-    // Salva i valori correnti nel localStorage
-    localStorage.setItem('trackedModelValues', JSON.stringify(this.previousValues));
+  async savePreviousValues(values) {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ previousValues: values }, () => {
+        console.log('Values saved to storage');
+        resolve();
+      });
+    });
+  }
+
+  getRewardInterval(total) {
+    let next = 100;
+    if (total <= 50) {
+      next = 10;
+    } else if (total <= 500) {
+      next = 25;
+    } else if (total <= 1000) {
+      next = 50;
+    }
+    return next;
+  }
+
+  nextRewardPoints(total) {
+    const interval = this.getRewardInterval(total);
+    const mod = total % interval;
+    if (total === 0 || mod === 0) {
+      return total + interval;
+    }
+    return total + (interval - mod);
+  }
+
+  calculateTotalPoints(downloads, prints) {
+    return downloads + (prints * 2);
   }
 
   async sendTelegramMessage(message) {
+    if (!this.telegramToken || !this.chatId) {
+      console.error('Missing Token or Chat ID');
+      return false;
+    }
+
     try {
+      console.log('Sending Telegram message:', message);
       const response = await fetch(`https://api.telegram.org/bot${this.telegramToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: this.chatId, text: message }),
+        body: JSON.stringify({ 
+          chat_id: this.chatId, 
+          text: message,
+          parse_mode: 'HTML'
+        })
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Telegram Error:', errorText);
-        return false;
+        throw new Error(`HTTP Error: ${response.status}`);
       }
 
+      const result = await response.json();
+      console.log('Telegram response:', result);
       return true;
-    } catch (err) {
-      console.error('Network or processing error:', err);
+    } catch (error) {
+      console.error('Error sending message:', error);
       return false;
     }
   }
 
-  async sendTelegramPhoto(message, photoUrl) {
+  async sendTelegramMessageWithPhoto(message, photoUrl) {
+    if (!this.telegramToken || !this.chatId || !photoUrl) {
+      console.error('Missing Token, Chat ID, or photo URL:', {
+        hasToken: !!this.telegramToken,
+        hasChatId: !!this.chatId,
+        hasPhotoUrl: !!photoUrl
+      });
+      return this.sendTelegramMessage(message);
+    }
+
     try {
+      console.log('Attempting to send photo:', {
+        message,
+        photoUrl,
+        chatId: this.chatId
+      });
+
+      const imageResponse = await fetch(photoUrl);
+      if (!imageResponse.ok) {
+        throw new Error(`Image download failed: ${imageResponse.status}`);
+      }
+
+      const imageBlob = await imageResponse.blob();
+      console.log('Image downloaded, size:', imageBlob.size);
+
       const formData = new FormData();
       formData.append('chat_id', this.chatId);
       formData.append('caption', message);
-      
-      // Fetch the image and convert to blob
-      const imageResponse = await fetch(photoUrl);
-      const imageBlob = await imageResponse.blob();
       formData.append('photo', imageBlob, 'model_image.jpg');
 
       const response = await fetch(`https://api.telegram.org/bot${this.telegramToken}/sendPhoto`, {
@@ -61,267 +119,344 @@ class ValueMonitor {
         body: formData
       });
 
+      const result = await response.json();
+      console.log('Telegram response:', result);
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Telegram Photo Error:', errorText);
-        return false;
+        throw new Error(`Telegram Error: ${response.status}`);
       }
 
       return true;
-    } catch (err) {
-      console.error('Network or processing error:', err);
-      return false;
+    } catch (error) {
+      console.error('Error sending photo:', error);
+      return this.sendTelegramMessage(message);
     }
   }
 
   getCurrentValues() {
     try {
-      const downloadElements = document.querySelectorAll('[data-trackid]');
       const currentValues = {
         models: {},
-        points: 0
+        points: 0,
+        timestamp: Date.now()
       };
-  
+
+      try {
+        const pointsElement = document.evaluate(
+          '//*[@id="userInfo_wrap"]/div[4]/div/a/div/div/span/span',
+          document,
+          null,
+          XPathResult.FIRST_ORDERED_NODE_TYPE,
+          null
+        ).singleNodeValue;
+
+        if (pointsElement) {
+          currentValues.points = parseFloat(pointsElement.textContent.replace(',', '.'));
+          console.log('Points found:', currentValues.points);
+        }
+      } catch (pointsError) {
+        console.error('Error extracting points:', pointsError);
+      }
+
+      const downloadElements = document.querySelectorAll('[data-trackid]');
       downloadElements.forEach((element) => {
         const modelId = element.getAttribute('data-trackid');
+        console.log(`Processing model ID: ${modelId}`);
         
-        // Estrai solo il nome del modello, rimuovendo altri dettagli
-        const fullText = element.textContent.trim();
-        const modelName = fullText.split(/\d/)[0].trim();
+        const modelLink = element.querySelector('a[title]');
+        const name = modelLink?.getAttribute('title') || 'Model';
         
-        // Find download and prints elements
-        const printsDiv = element.querySelector("div.download_count");
-        const sibs = this.getSiblings(printsDiv);
-        const downloadsDiv = sibs[sibs.length-1];
-  
-        // Extract numeric values
-        const printsStr = printsDiv.querySelector("span").textContent;
-        const downloadsStr = downloadsDiv.querySelector("span").textContent;
-        
-        const numPrints = this.strToNumber(printsStr);
-        const numDownloads = this.strToNumber(downloadsStr);
-  
-        currentValues.models[modelId] = {
-          name: modelName,
-          prints: numPrints,
-          downloads: numDownloads
-        };
+        const imageElement = element.querySelector('img.lazy, img.gif-image');
+        const imageUrl = imageElement?.getAttribute('src') || '';
+
+        const statDivs = Array.from(element.querySelectorAll('div')).filter(div => {
+            return div.className.includes('mw-css-12g5tx') && div.querySelector('span');
+        });
+
+        if (statDivs.length >= 3) {
+            const boostValue = statDivs[statDivs.length - 3]?.querySelector('span')?.textContent || '0';
+            const downloadValue = statDivs[statDivs.length - 2]?.querySelector('span')?.textContent || '0';
+            const printValue = statDivs[statDivs.length - 1]?.querySelector('span')?.textContent || '0';
+
+            const boost = this.parseNumber(boostValue);
+            const downloads = this.parseNumber(downloadValue);
+            const prints = this.parseNumber(printValue);
+
+            currentValues.models[modelId] = {
+                name,
+                boosts: boost,
+                downloads: downloads,
+                prints: prints,
+                imageUrl
+            };
+
+            console.log(`Model "${name}":`, {
+                rawValues: {
+                    boost: boostValue,
+                    downloads: downloadValue,
+                    prints: printValue
+                },
+                convertedValues: {
+                    boost,
+                    downloads,
+                    prints
+                }
+            });
+        } else {
+            console.log(`Not enough stat divs found for ${name} (found: ${statDivs.length})`);
+        }
       });
-
-      // Extract points information
-      const pointsElement = document.evaluate(
-        '//*[@id="userInfo_wrap"]/div[4]/div/a/div/div/span/span',
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      ).singleNodeValue;
-
-      currentValues.points = parseFloat(pointsElement.textContent.replace(',', '.'));
 
       return currentValues;
     } catch (error) {
-      console.error('Error during value extraction:', error);
+      console.error('Error extracting values:', error);
       return null;
     }
   }
 
-  // Utility methods
-  strToNumber(inVal) {
-    const groups = /(\d+)\.?(\d+)?\sk/.exec(inVal);
-    if (groups && groups[1]) {
-      let val = Number(groups[1] * 1000);
-      if (groups[2]) {
-        val += Number(groups[2] * 100);
-      }
-      return val;
+  parseNumber(text) {
+    if (!text) return 0;
+    text = text.trim().toLowerCase();
+    
+    if (text.includes('k')) {
+      const base = parseFloat(text.replace('k', ''));
+      return Math.round(base * 1000);
     }
-    return Number(inVal);
-  }
-
-  getSiblings(elem) {
-    return Array.from(elem.parentNode.childNodes).filter((s) => s !== elem);
-  }
-
-  async checkAndNotify() {
-    const currentValues = this.getCurrentValues();
-
-    if (!currentValues) {
-      console.error('Unable to get current values');
-      return;
-    }
-
-    // Flag per verificare se ci sono state modifiche
-    let hasChanges = false;
-
-    // Controlla i download per ogni modello
-    for (const [modelId, modelData] of Object.entries(currentValues.models)) {
-      const prevModelData = this.previousValues.models[modelId] || {};
-
-      // Controlla download
-      if (modelData.downloads > (prevModelData.downloads || 0)) {
-        const increase = modelData.downloads - (prevModelData.downloads || 0);
-        
-        // Trova l'elemento del modello per estrarre l'URL dell'immagine
-        const modelElement = document.querySelector(`[data-trackid="${modelId}"]`);
-        const imageUrl = modelElement ? modelElement.querySelector('img')?.src : null;
-
-        const message = `🔥 New Downloads for Model: ${modelData.name}
-Previous: ${prevModelData.downloads || 0}
-Current: ${modelData.downloads}
-Increase: +${increase}`;
-
-        if (imageUrl) {
-          await this.sendTelegramPhoto(message, imageUrl);
-        } else {
-          await this.sendTelegramMessage(message);
-        }
-        
-        hasChanges = true;
-      }
-
-      // Controlla prints
-      if (modelData.prints > (prevModelData.prints || 0)) {
-        const increase = modelData.prints - (prevModelData.prints || 0);
-        
-        // Trova l'elemento del modello per estrarre l'URL dell'immagine
-        const modelElement = document.querySelector(`[data-trackid="${modelId}"]`);
-        const imageUrl = modelElement ? modelElement.querySelector('img')?.src : null;
-
-        const message = `📄 New Prints for Model ${modelData.name}:
-Previous: ${prevModelData.prints || 0}
-Current: ${modelData.prints}
-Increase: +${increase}`;
-
-        if (imageUrl) {
-          await this.sendTelegramPhoto(message, imageUrl);
-        } else {
-          await this.sendTelegramMessage(message);
-        }
-        
-        hasChanges = true;
-      }
-
-      // Aggiorna i valori precedenti
-      this.previousValues.models[modelId] = modelData;
-    }
-
-    // Controlla punti
-    if (currentValues.points > this.previousValues.points) {
-      const pointsIncrease = currentValues.points - this.previousValues.points;
-      await this.sendTelegramMessage(`⭐️ New Points!
-Previous: ${this.previousValues.points}
-Current: ${currentValues.points} 
-Increase: +${pointsIncrease.toFixed(1)}`);
-      
-      hasChanges = true;
-      this.previousValues.points = currentValues.points;
-    }
-
-    // Salva i valori solo se ci sono state modifiche
-    if (hasChanges) {
-      this.saveValues();
-    }
+    
+    return parseInt(text.replace(/[^\d]/g, '')) || 0;
   }
 
   getDailySummary() {
     const currentValues = this.getCurrentValues();
-
     if (!currentValues) {
-        console.error('Unable to get current values');
-        return null;
+      console.error('Unable to get current values');
+      return null;
     }
 
-    // Calcola i totali
-    const totalDownloads = Object.values(currentValues.models).reduce((sum, model) => sum + model.downloads, 0);
-    const totalPrints = Object.values(currentValues.models).reduce((sum, model) => sum + model.prints, 0);
+    const totalDownloads = Object.values(currentValues.models)
+      .reduce((sum, model) => sum + model.downloads, 0);
+    const totalPrints = Object.values(currentValues.models)
+      .reduce((sum, model) => sum + model.prints, 0);
 
-    // Ottieni la Top 5
     const top5Downloads = Object.values(currentValues.models)
-        .sort((a, b) => b.downloads - a.downloads)
-        .slice(0, 5);
+      .sort((a, b) => b.downloads - a.downloads)
+      .slice(0, 5);
     const top5Prints = Object.values(currentValues.models)
-        .sort((a, b) => b.prints - a.prints)
-        .slice(0, 5);
+      .sort((a, b) => b.prints - a.prints)
+      .slice(0, 5);
 
-    return { totalDownloads, totalPrints, top5Downloads, top5Prints };
+    return { 
+      totalDownloads, 
+      totalPrints, 
+      points: currentValues.points,
+      top5Downloads, 
+      top5Prints 
+    };
   }
 
   scheduleDailyNotification() {
     chrome.storage.sync.get(['dailyReport', 'dailyNotificationTime'], (config) => {
-        const dailyReport = config.dailyReport || 'yes';
-        if (dailyReport === 'no') {
-            console.log('[INFO] Daily report is disabled.');
-            return;
-        }
+      const dailyReport = config.dailyReport || 'yes';
+      if (dailyReport === 'no') {
+        console.log('Daily report disabled');
+        return;
+      }
 
-        const dailyTime = config.dailyNotificationTime || '12:00';
-        const [hour, minute] = dailyTime.split(':').map(Number);
+      const dailyTime = config.dailyNotificationTime || '12:00';
+      const [hour, minute] = dailyTime.split(':').map(Number);
 
-        const now = new Date();
-        const nextNotification = new Date();
-        nextNotification.setHours(hour, minute, 0, 0);
+      const now = new Date();
+      const nextNotification = new Date();
+      nextNotification.setHours(hour, minute, 0, 0);
 
-        if (nextNotification <= now) {
-            nextNotification.setDate(nextNotification.getDate() + 1);
-        }
+      if (nextNotification <= now) {
+        nextNotification.setDate(nextNotification.getDate() + 1);
+      }
 
-        const delay = nextNotification - now;
-        console.log(`[INFO] Daily notification scheduled at ${nextNotification}. Delay: ${delay} ms`);
+      const delay = nextNotification - now;
+      console.log(`Daily report scheduled for: ${nextNotification}. Delay: ${delay}ms`);
 
-        setTimeout(async () => {
-            console.log(`[INFO] Triggering daily notification at ${new Date()}`);
-
-            const summary = this.getDailySummary();
-            if (summary) {
-                const message = `
+      setTimeout(async () => {
+        console.log(`Sending daily report: ${new Date()}`);
+        const summary = this.getDailySummary();
+        if (summary) {
+          const message = `
 📊 Daily Summary:
 - Total Downloads: ${summary.totalDownloads}
 - Total Prints: ${summary.totalPrints}
+- Total Points: ${summary.points}
 
 🏆 Top 5 Downloads:
 ${summary.top5Downloads.map((m, i) => `${i + 1}. ${m.name}: ${m.downloads}`).join('\n')}
 
-🏅 Top 5 Prints:
-${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: ${m.prints}`).join('\n')}
-                `;
-                await this.sendTelegramMessage(message);
-            } else {
-                console.error('[ERROR] Failed to generate daily summary.');
-            }
+🖨️ Top 5 Prints:
+${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: ${m.prints}`).join('\n')}`;
 
-            this.scheduleDailyNotification();
-        }, delay);
+          await this.sendTelegramMessage(message);
+        }
+
+        this.scheduleDailyNotification();
+      }, delay);
     });
   }
 
-  start() {
-    chrome.storage.sync.get(['telegramToken', 'chatId', 'refreshInterval'], (config) => {
-        if (config.telegramToken && config.chatId) {
-            this.telegramToken = config.telegramToken;
-            this.chatId = config.chatId;
-            this.refreshInterval = config.refreshInterval || 900000;
+  async checkAndNotify() {
+    if (this.isChecking) {
+      console.log('Check already in progress, skipping...');
+      return;
+    }
+    this.isChecking = true;
 
-            this.checkAndNotify(); // Controllo immediato
-            this.scheduleDailyNotification(); // Pianifica la notifica giornaliera
+    try {
+      console.log('Starting change check...');
+      
+      const currentValues = this.getCurrentValues();
+      if (!currentValues) {
+        console.log('No current values found');
+        return;
+      }
 
-            this.timer = setInterval(() => this.checkAndNotify(), 60000);
-            console.log('[INFO] Monitoring started');
-        } else {
-            console.error('[ERROR] Telegram configuration missing. Please set up in extension options.');
+      if (!this.previousValues) {
+        await this.loadPreviousValues();
+      }
+
+      if (!this.previousValues) {
+        console.log('First run, saving initial values');
+        this.previousValues = currentValues;
+        await this.savePreviousValues(currentValues);
+        return;
+      }
+
+      if (currentValues.points > this.previousValues.points) {
+        const message = `
+⭐️ New Points!
+Before: ${this.previousValues.points}
+After: ${currentValues.points} 
+Increase: +${(currentValues.points - this.previousValues.points).toFixed(1)}`;
+        
+        await this.sendTelegramMessage(message);
+      }
+
+      for (const [id, current] of Object.entries(currentValues.models)) {
+        const previous = this.previousValues.models[id];
+        if (!previous) {
+          console.log(`New model found: ${current.name}`);
+          continue;
         }
+
+        const previousTotal = this.calculateTotalPoints(previous.downloads, previous.prints);
+        const currentTotal = this.calculateTotalPoints(current.downloads, current.prints);
+        const nextReward = this.nextRewardPoints(currentTotal);
+        const pointsToNext = nextReward - currentTotal;
+        const rewardInterval = this.getRewardInterval(currentTotal);
+
+        console.log(`\nChecking model "${current.name}":`, {
+          'Previous downloads': previous.downloads,
+          'Current downloads': current.downloads,
+          'Previous prints': previous.prints,
+          'Current prints': current.prints
+        });
+
+        if (current.boosts > previous.boosts) {
+          const message = `
+⚡️ New boosts for: ${current.name}
+Before: ${previous.boosts}
+After: ${current.boosts}
+Increase: +${current.boosts - previous.boosts}`;
+            
+          console.log('Sending boost notification...');
+          await this.sendTelegramMessageWithPhoto(message, current.imageUrl);
+        }
+
+        if (current.downloads > previous.downloads) {
+          const newPoints = current.downloads - previous.downloads;
+          const message = `
+📈 New downloads for: ${current.name}
+Before: ${previous.downloads}
+After: ${current.downloads}
+Increase: +${current.downloads - previous.downloads}
+
+📊 Points Status:
+Total Points: ${currentTotal} (+${newPoints})
+Next Reward: ${nextReward} (${pointsToNext} points needed)
+Reward Interval: every ${rewardInterval} points`;
+          
+          console.log('Sending downloads notification...');
+          await this.sendTelegramMessageWithPhoto(message, current.imageUrl);
+        }
+
+        if (current.prints > previous.prints) {
+          const newPoints = (current.prints - previous.prints) * 2;
+          const message = `
+🖨️ New prints for: ${current.name}
+Before: ${previous.prints}
+After: ${current.prints}
+Increase: +${current.prints - previous.prints}
+
+📊 Points Status:
+Total Points: ${currentTotal} (+${newPoints})
+Next Reward: ${nextReward} (${pointsToNext} points needed)
+Reward Interval: every ${rewardInterval} points`;
+          
+          console.log('Sending prints notification...');
+          await this.sendTelegramMessageWithPhoto(message, current.imageUrl);
+        }
+      }
+
+      this.previousValues = currentValues;
+      await this.savePreviousValues(currentValues);
+
+    } catch (error) {
+      console.error('Error during check:', error);
+    } finally {
+      this.isChecking = false;
+    }
+  }
+
+  start() {
+    console.log('Starting monitor...');
+    
+    chrome.storage.sync.get(['telegramToken', 'chatId', 'refreshInterval', 'dailyReport', 'dailyNotificationTime'], async (config) => {
+      if (!config.telegramToken || !config.chatId) {
+        console.error('Missing Telegram configuration');
+        return;
+      }
+
+      this.telegramToken = config.telegramToken;
+      this.chatId = config.chatId;
+      
+      const refreshInterval = config.refreshInterval || 900000; // Default 15 minutes
+      console.log(`Refresh interval: ${refreshInterval}ms`);
+
+      // First check
+      await this.checkAndNotify();
+
+      // Set periodic refresh
+      this.checkInterval = setInterval(() => {
+        console.log('Refreshing page...');
+        window.location.reload();
+      }, refreshInterval);
+
+      // Schedule daily report if enabled
+      if (config.dailyReport !== 'no') {
+        this.scheduleDailyNotification();
+      }
+
+      console.log(`Monitor started, refresh every ${refreshInterval/60000} minutes`);
     });
   }
 
   stop() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-      console.log('Monitoring stopped');
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval);
+      this.checkInterval = null;
     }
+    this.isChecking = false;
+    console.log('Monitor stopped');
   }
 }
 
-// Inizializza il monitor quando la pagina carica
-const monitor = new ValueMonitor({});
+// Startup
+console.log('Initializing monitor...');
+const monitor = new ValueMonitor();
 monitor.start();

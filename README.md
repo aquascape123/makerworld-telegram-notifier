@@ -1,67 +1,66 @@
-# MakerWorld Notifier
+# MakerWorld Monitor
 
-This Chrome extension monitors your MakerWorld account for changes in downloads, prints, and points. When a change is detected, you will receive a Telegram notification with the model details and image!
+A Chrome extension that tracks your MakerWorld models' performance and sends notifications via Telegram.
 
 ## Features
+- Real-time monitoring of:
+  - Downloads
+  - Prints
+  - Boosts
+  - Points
+- Automated notifications for:
+  - New downloads (with point tracking)
+  - New prints (with 2x point multiplier)
+  - New boosts
+  - Point rewards
+- Daily summary reports including:
+  - Total downloads and prints
+  - Current points
+  - Top 5 most downloaded models
+  - Top 5 most printed models
+- Configurable refresh intervals (5min to 1hr)
+- Image previews in notifications
+- Point reward tracking system with dynamic intervals (10, 25, 50, or 100 points)
 
-* Monitors downloads, prints, and points on MakerWorld.
-* Sends Telegram notifications with:
-  * new downloads and prints
-  * Model image included with notifications
-  * Daily summary report
-* Fully customizable: configure your Telegram Bot Token, Chat ID, and refresh interval.
-
-## What's New
-
-### Recent Updates
-* Added model image to notifications
-* Introduced daily summary report
-* Enhanced tracking and notification system
+## Requirements
+- Chrome or Chromium-based browser
+- **Recommended Setup**: Raspberry Pi running Chromium
+  - Perfect for 24/7 monitoring since the webpage needs to stay open
+  - Low power consumption
+  - Headless operation possible
+- Telegram account and bot token (create one through [BotFather](https://t.me/botfather) if you don't have it)
 
 ## Installation
+1. Download and extract the repository
+2. Open Chrome's Extension Management page (`chrome://extensions`)
+3. Enable Developer Mode
+4. Click "Load unpacked" and select the extracted folder
 
-1. Download the repository as a ZIP file and extract it.
-2. Open `chrome://extensions` in your browser.
-3. Enable **Developer Mode** (top-right corner).
-4. Click on **Load unpacked** and select the extracted folder.
-5. Configure your **Telegram Token**, **Chat ID**, and refresh interval on the options page.
-   * YOUR MAKERWORLD PROFILE PAGE MUST REMAIN OPEN -
+## Configuration
+1. Click the extension icon
+2. Configure Telegram:
+   - Create a new bot with [BotFather](https://t.me/botfather) if needed:
+     1. Start a chat with BotFather
+     2. Send `/newbot` command
+     3. Follow instructions to set name and username
+     4. Copy the provided token
+   - Enter your bot token and chat ID
+3. Set your preferred refresh interval
+4. Configure daily report settings:
+   - Enable/disable daily summaries
+   - Set preferred notification time
+5. Click Save
 
-## Usage
+## Raspberry Pi Setup Tips
+- Use Raspberry Pi OS Lite for minimal resource usage
+- Install Chromium: `sudo apt install chromium-browser`
+- Set up auto-login and browser autostart
+- Configure system to prevent sleep/display shutdown
+- Use a stable internet connection
 
-1. Open the options page.
-2. Enter your Telegram Bot Token, Chat ID, and preferred refresh interval.
-3. Save your settings. The extension will start monitoring automatically.
-4. Open your makerworld profile page "https://makerworld.com/en/@yourusername" and leave it open
-
-### New Daily Summary Feature
-
-* Receive a comprehensive daily report with:
-  * Total downloads across all models
-  * Total prints across all models
-  * Top 5 models by downloads
-  * Top 5 models by prints
-* Configurable daily report time
-* Option to enable/disable daily reports
-
-## Notification Types
-
-1. **Notifications**
-   * When a model gets new downloads or prints (at the of the refresh interval)
-   * Includes model name, previous and current counts
-   * Displays the model's image
-
-2. **Daily Summary**
-   * Sent at a user-configurable time
-   * Provides an overview of your MakerWorld activity
-
-## Support the Developer
-
-If this extension has been helpful to you, consider supporting my work by boosting my models on MakerWorld:
-[🚀 Boost My Models on MakerWorld](https://makerworld.com/en/@aquascape)
-
-Your support helps me continue developing and improving tools like this!
+## Support
+If you find this extension helpful, consider supporting my work:
+[🚀 My MakerWorld Profile](https://makerworld.com/en/@aquascape)
 
 ## License
-
 MIT
