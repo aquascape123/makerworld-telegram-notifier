@@ -133,7 +133,7 @@ class ValueMonitor {
     }
   }
 
-  getCurrentValues() {
+  async getCurrentValues() {
     try {
       const currentValues = {
         models: {},
@@ -141,6 +141,7 @@ class ValueMonitor {
         timestamp: Date.now()
       };
 
+      // Get points
       try {
         const pointsElement = document.evaluate(
           '//*[@id="userInfo_wrap"]/div[4]/div/a/div/div/span/span',
@@ -152,66 +153,95 @@ class ValueMonitor {
 
         if (pointsElement) {
           currentValues.points = parseFloat(pointsElement.textContent.replace(',', '.'));
-          console.log('Points found:', currentValues.points);
         }
       } catch (pointsError) {
         console.error('Error extracting points:', pointsError);
       }
 
-      const downloadElements = document.querySelectorAll('[data-trackid]');
-      downloadElements.forEach((element) => {
-        const modelId = element.getAttribute('data-trackid');
-        console.log(`Processing model ID: ${modelId}`);
+      // Get total pages
+      const paginationLinks = document.querySelectorAll('.pagination a');
+      const totalPages = Math.max(...Array.from(paginationLinks)
+        .map(link => parseInt(link.textContent))
+        .filter(num => !isNaN(num))) || 1;
+
+      console.log(`Total pages found: ${totalPages}`);
+
+      // Process current page
+      await this.processPage(currentValues.models);
+      console.log(`Processed page 1 of ${totalPages}`);
+
+      // Process remaining pages
+      for (let page = 2; page <= totalPages; page++) {
+        const pageUrl = new URL(window.location.href);
+        pageUrl.searchParams.set('page', page);
         
-        const modelLink = element.querySelector('a[title]');
-        const name = modelLink?.getAttribute('title') || 'Model';
+        console.log(`Fetching page ${page}...`);
+        const response = await fetch(pageUrl);
+        const text = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(text, 'text/html');
         
-        const imageElement = element.querySelector('img.lazy, img.gif-image');
-        const imageUrl = imageElement?.getAttribute('src') || '';
+        await this.processPage(currentValues.models, doc);
+        console.log(`Processed page ${page} of ${totalPages}`);
+      }
 
-        const statDivs = Array.from(element.querySelectorAll('div')).filter(div => {
-            return div.className.includes('mw-css-12g5tx') && div.querySelector('span');
-        });
-
-        if (statDivs.length >= 3) {
-            const boostValue = statDivs[statDivs.length - 3]?.querySelector('span')?.textContent || '0';
-            const downloadValue = statDivs[statDivs.length - 2]?.querySelector('span')?.textContent || '0';
-            const printValue = statDivs[statDivs.length - 1]?.querySelector('span')?.textContent || '0';
-
-            const boost = this.parseNumber(boostValue);
-            const downloads = this.parseNumber(downloadValue);
-            const prints = this.parseNumber(printValue);
-
-            currentValues.models[modelId] = {
-                name,
-                boosts: boost,
-                downloads: downloads,
-                prints: prints,
-                imageUrl
-            };
-
-            console.log(`Model "${name}":`, {
-                rawValues: {
-                    boost: boostValue,
-                    downloads: downloadValue,
-                    prints: printValue
-                },
-                convertedValues: {
-                    boost,
-                    downloads,
-                    prints
-                }
-            });
-        } else {
-            console.log(`Not enough stat divs found for ${name} (found: ${statDivs.length})`);
-        }
-      });
-
+      console.log(`Total models processed: ${Object.keys(currentValues.models).length}`);
       return currentValues;
     } catch (error) {
       console.error('Error extracting values:', error);
       return null;
     }
+  }
+
+  async processPage(models, doc = document) {
+    const downloadElements = doc.querySelectorAll('[data-trackid]');
+    downloadElements.forEach((element) => {
+      const modelId = element.getAttribute('data-trackid');
+      console.log(`Processing model ID: ${modelId}`);
+      
+      const modelLink = element.querySelector('a[title]');
+      const name = modelLink?.getAttribute('title') || 'Model';
+      
+      const imageElement = element.querySelector('img.lazy, img.gif-image');
+      const imageUrl = imageElement?.getAttribute('src') || '';
+
+      const statDivs = Array.from(element.querySelectorAll('div')).filter(div => {
+        return div.className.includes('mw-css-12g5tx') && div.querySelector('span');
+      });
+
+      if (statDivs.length >= 3) {
+        const boostValue = statDivs[statDivs.length - 3]?.querySelector('span')?.textContent || '0';
+        const downloadValue = statDivs[statDivs.length - 2]?.querySelector('span')?.textContent || '0';
+        const printValue = statDivs[statDivs.length - 1]?.querySelector('span')?.textContent || '0';
+
+        const boost = this.parseNumber(boostValue);
+        const downloads = this.parseNumber(downloadValue);
+        const prints = this.parseNumber(printValue);
+
+        models[modelId] = {
+          name,
+          boosts: boost,
+          downloads: downloads,
+          prints: prints,
+          imageUrl
+        };
+
+        console.log(`Model "${name}":`, {
+          rawValues: {
+            boost: boostValue,
+            downloads: downloadValue,
+            prints: printValue
+          },
+          convertedValues: {
+            boost,
+            downloads,
+            prints
+          }
+        });
+      } else {
+        console.log(`Not enough stat divs found for ${name} (found: ${statDivs.length})`);
+      }
+    });
   }
 
   parseNumber(text) {
@@ -310,7 +340,7 @@ ${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: ${m.prints}`).join('\n'
     try {
       console.log('Starting change check...');
       
-      const currentValues = this.getCurrentValues();
+      const currentValues = await this.getCurrentValues();
       if (!currentValues) {
         console.log('No current values found');
         return;
