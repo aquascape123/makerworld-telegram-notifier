@@ -133,7 +133,7 @@ class ValueMonitor {
     }
   }
 
-  async getCurrentValues() {
+  getCurrentValues() {
     try {
       const currentValues = {
         models: {},
@@ -141,107 +141,93 @@ class ValueMonitor {
         timestamp: Date.now()
       };
 
-      // Get points
       try {
-        const pointsElement = document.evaluate(
-          '//*[@id="userInfo_wrap"]/div[4]/div/a/div/div/span/span',
-          document,
-          null,
-          XPathResult.FIRST_ORDERED_NODE_TYPE,
-          null
-        ).singleNodeValue;
+        console.log('Starting points search...');
+        
+        // Troviamo il div che contiene i punti
+        const pointsContainer = document.querySelector('.mw-css-1541sxf');
+        console.log('Found points container:', !!pointsContainer);
 
-        if (pointsElement) {
-          currentValues.points = parseFloat(pointsElement.textContent.replace(',', '.'));
+        if (pointsContainer) {
+            // Prendiamo tutto il testo, inclusi i numeri e i decimali
+            const pointsText = pointsContainer.textContent.trim();
+            console.log('Raw points text:', pointsText);
+            
+            // Estraiamo tutti i numeri dal testo
+            const numbers = pointsText.match(/\d+(\.\d+)?/g);
+            console.log('Found numbers:', numbers);
+            
+            if (numbers && numbers.length > 0) {
+                // Combiniamo i numeri se necessario
+                const fullNumber = numbers.join('');
+                currentValues.points = parseFloat(fullNumber);
+                console.log('Points found:', currentValues.points);
+            }
+        } else {
+            console.log('Could not find points element');
         }
       } catch (pointsError) {
         console.error('Error extracting points:', pointsError);
       }
 
-      // Get total pages
-      const paginationLinks = document.querySelectorAll('.pagination a');
-      const totalPages = Math.max(...Array.from(paginationLinks)
-        .map(link => parseInt(link.textContent))
-        .filter(num => !isNaN(num))) || 1;
-
-      console.log(`Total pages found: ${totalPages}`);
-
-      // Process current page
-      await this.processPage(currentValues.models);
-      console.log(`Processed page 1 of ${totalPages}`);
-
-      // Process remaining pages
-      for (let page = 2; page <= totalPages; page++) {
-        const pageUrl = new URL(window.location.href);
-        pageUrl.searchParams.set('page', page);
+      const downloadElements = document.querySelectorAll('[data-trackid]');
+      downloadElements.forEach((element) => {
+        const modelId = element.getAttribute('data-trackid');
+        console.log(`Processing model ID: ${modelId}`);
         
-        console.log(`Fetching page ${page}...`);
-        const response = await fetch(pageUrl);
-        const text = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(text, 'text/html');
+        const modelTitle = element.querySelector('h3.translated-text');
+        const name = modelTitle?.textContent.trim() || 'Model';
         
-        await this.processPage(currentValues.models, doc);
-        console.log(`Processed page ${page} of ${totalPages}`);
-      }
+        const imageElement = element.querySelector('img');
+        const imageUrl = imageElement?.getAttribute('src') || '';
 
-      console.log(`Total models processed: ${Object.keys(currentValues.models).length}`);
+        // Prendiamo tutti i div con classe n7pqs3 direttamente
+        const allMetrics = element.querySelectorAll('.mw-css-xlgty3 span');
+        
+        if (allMetrics.length >= 3) {
+            // Nelle metriche che abbiamo, alcune sono nel primo dtg2n1 (likes, bookmarks)
+            // e quelle che ci interessano sono nel secondo. Sappiamo che quelle che ci
+            // interessano sono le ultime 3
+            const lastThree = Array.from(allMetrics).slice(-3);
+            
+            const boostValue = lastThree[0]?.textContent || '0';
+            const downloadValue = lastThree[1]?.textContent || '0';
+            const printValue = lastThree[2]?.textContent || '0';
+
+            const boost = this.parseNumber(boostValue);
+            const downloads = this.parseNumber(downloadValue);
+            const prints = this.parseNumber(printValue);
+
+            currentValues.models[modelId] = {
+                name,
+                boosts: boost,
+                downloads: downloads,
+                prints: prints,
+                imageUrl
+            };
+
+            console.log(`Model "${name}":`, {
+                rawValues: {
+                    boost: boostValue,
+                    downloads: downloadValue,
+                    prints: printValue
+                },
+                convertedValues: {
+                    boost,
+                    downloads,
+                    prints
+                }
+            });
+        } else {
+            console.log(`Not enough metrics found for ${name} (found: ${allMetrics.length})`);
+        }
+      });
+
       return currentValues;
     } catch (error) {
       console.error('Error extracting values:', error);
       return null;
     }
-  }
-
-  async processPage(models, doc = document) {
-    const downloadElements = doc.querySelectorAll('[data-trackid]');
-    downloadElements.forEach((element) => {
-      const modelId = element.getAttribute('data-trackid');
-      console.log(`Processing model ID: ${modelId}`);
-      
-      const modelLink = element.querySelector('a[title]');
-      const name = modelLink?.getAttribute('title') || 'Model';
-      
-      const imageElement = element.querySelector('img.lazy, img.gif-image');
-      const imageUrl = imageElement?.getAttribute('src') || '';
-
-      const statDivs = Array.from(element.querySelectorAll('div')).filter(div => {
-        return div.className.includes('mw-css-12g5tx') && div.querySelector('span');
-      });
-
-      if (statDivs.length >= 3) {
-        const boostValue = statDivs[statDivs.length - 3]?.querySelector('span')?.textContent || '0';
-        const downloadValue = statDivs[statDivs.length - 2]?.querySelector('span')?.textContent || '0';
-        const printValue = statDivs[statDivs.length - 1]?.querySelector('span')?.textContent || '0';
-
-        const boost = this.parseNumber(boostValue);
-        const downloads = this.parseNumber(downloadValue);
-        const prints = this.parseNumber(printValue);
-
-        models[modelId] = {
-          name,
-          boosts: boost,
-          downloads: downloads,
-          prints: prints,
-          imageUrl
-        };
-
-        console.log(`Model "${name}":`, {
-          rawValues: {
-            boost: boostValue,
-            downloads: downloadValue,
-            prints: printValue
-          },
-          convertedValues: {
-            boost,
-            downloads,
-            prints
-          }
-        });
-      } else {
-        console.log(`Not enough stat divs found for ${name} (found: ${statDivs.length})`);
-      }
-    });
   }
 
   parseNumber(text) {
@@ -256,31 +242,86 @@ class ValueMonitor {
     return parseInt(text.replace(/[^\d]/g, '')) || 0;
   }
 
-  getDailySummary() {
+  async getDailySummary() {
     const currentValues = this.getCurrentValues();
     if (!currentValues) {
       console.error('Unable to get current values');
       return null;
     }
 
-    const totalDownloads = Object.values(currentValues.models)
-      .reduce((sum, model) => sum + model.downloads, 0);
-    const totalPrints = Object.values(currentValues.models)
-      .reduce((sum, model) => sum + model.prints, 0);
+    // Carica i dati del giorno precedente
+    const previousDay = await new Promise((resolve) => {
+      chrome.storage.local.get(['dailyStats'], (result) => {
+        if (result.dailyStats && (Date.now() - result.dailyStats.timestamp) <= 24 * 60 * 60 * 1000) {
+          resolve(result.dailyStats);
+        } else {
+          resolve(null);
+        }
+      });
+    });
 
-    const top5Downloads = Object.values(currentValues.models)
-      .sort((a, b) => b.downloads - a.downloads)
-      .slice(0, 5);
-    const top5Prints = Object.values(currentValues.models)
-      .sort((a, b) => b.prints - a.prints)
+    // Salva i dati correnti per il prossimo confronto
+    chrome.storage.local.set({
+      dailyStats: {
+        models: currentValues.models,
+        points: currentValues.points,
+        timestamp: Date.now()
+      }
+    });
+
+    if (!previousDay) {
+      console.log('No previous day data available');
+      return {
+        dailyDownloads: 0,
+        dailyPrints: 0,
+        points: currentValues.points,
+        pointsGained: 0,
+        top5Downloads: [],
+        top5Prints: [],
+        from: new Date().toLocaleString(),
+        to: new Date().toLocaleString()
+      };
+    }
+
+    // Calcola le differenze per ogni modello
+    const modelChanges = {};
+    for (const [id, current] of Object.entries(currentValues.models)) {
+      const previous = previousDay.models[id] || { downloads: 0, prints: 0 };
+      if (current.downloads > previous.downloads || current.prints > previous.prints) {
+        modelChanges[id] = {
+          name: current.name,
+          downloadsGained: current.downloads - previous.downloads,
+          printsGained: current.prints - previous.prints
+        };
+      }
+    }
+
+    // Calcola totali giornalieri
+    const dailyDownloads = Object.values(modelChanges)
+      .reduce((sum, model) => sum + model.downloadsGained, 0);
+    const dailyPrints = Object.values(modelChanges)
+      .reduce((sum, model) => sum + model.printsGained, 0);
+
+    // Top 5 del giorno (solo modelli con cambiamenti)
+    const top5Downloads = Object.values(modelChanges)
+      .filter(m => m.downloadsGained > 0)
+      .sort((a, b) => b.downloadsGained - a.downloadsGained)
       .slice(0, 5);
 
-    return { 
-      totalDownloads, 
-      totalPrints, 
+    const top5Prints = Object.values(modelChanges)
+      .filter(m => m.printsGained > 0)
+      .sort((a, b) => b.printsGained - a.printsGained)
+      .slice(0, 5);
+
+    return {
+      dailyDownloads,
+      dailyPrints,
       points: currentValues.points,
-      top5Downloads, 
-      top5Prints 
+      pointsGained: currentValues.points - previousDay.points,
+      top5Downloads,
+      top5Prints,
+      from: new Date(previousDay.timestamp).toLocaleString(),
+      to: new Date().toLocaleString()
     };
   }
 
@@ -308,19 +349,19 @@ class ValueMonitor {
 
       setTimeout(async () => {
         console.log(`Sending daily report: ${new Date()}`);
-        const summary = this.getDailySummary();
+        const summary = await this.getDailySummary();
         if (summary) {
           const message = `
-📊 Daily Summary:
-- Total Downloads: ${summary.totalDownloads}
-- Total Prints: ${summary.totalPrints}
-- Total Points: ${summary.points}
+📊 24-Hour Summary (${summary.from} - ${summary.to}):
+- New Downloads: ${summary.dailyDownloads}
+- New Prints: ${summary.dailyPrints}
+- Points: ${summary.points} (${summary.pointsGained >= 0 ? '+' : ''}${summary.pointsGained})
 
-🏆 Top 5 Downloads:
-${summary.top5Downloads.map((m, i) => `${i + 1}. ${m.name}: ${m.downloads}`).join('\n')}
+🏆 Today's Most Downloaded:
+${summary.top5Downloads.map((m, i) => `${i + 1}. ${m.name}: +${m.downloadsGained}`).join('\n') || 'No new downloads today'}
 
-🖨️ Top 5 Prints:
-${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: ${m.prints}`).join('\n')}`;
+🖨️ Today's Most Printed:
+${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: +${m.printsGained}`).join('\n') || 'No new prints today'}`;
 
           await this.sendTelegramMessage(message);
         }
@@ -329,7 +370,6 @@ ${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: ${m.prints}`).join('\n'
       }, delay);
     });
   }
-
   async checkAndNotify() {
     if (this.isChecking) {
       console.log('Check already in progress, skipping...');
@@ -340,7 +380,7 @@ ${summary.top5Prints.map((m, i) => `${i + 1}. ${m.name}: ${m.prints}`).join('\n'
     try {
       console.log('Starting change check...');
       
-      const currentValues = await this.getCurrentValues();
+      const currentValues = this.getCurrentValues();
       if (!currentValues) {
         console.log('No current values found');
         return;
@@ -402,8 +442,8 @@ Increase: +${current.boosts - previous.boosts}`;
           const newPoints = current.downloads - previous.downloads;
           const message = `
 📈 New downloads for: ${current.name}
-Before: ${previous.downloads}
-After: ${current.downloads}
+
+Total: ${current.downloads}
 Increase: +${current.downloads - previous.downloads}
 
 📊 Points Status:
@@ -419,8 +459,8 @@ Reward Interval: every ${rewardInterval} points`;
           const newPoints = (current.prints - previous.prints) * 2;
           const message = `
 🖨️ New prints for: ${current.name}
-Before: ${previous.prints}
-After: ${current.prints}
+
+Total: ${current.prints}
 Increase: +${current.prints - previous.prints}
 
 📊 Points Status:
